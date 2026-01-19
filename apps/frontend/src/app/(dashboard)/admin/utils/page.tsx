@@ -85,7 +85,7 @@ export default function AdminUtilsPage() {
   };
 
   const toggleService = (serviceLabel: string) => {
-    setTechnicalIssueServices(prev => 
+    setTechnicalIssueServices(prev =>
       prev.includes(serviceLabel)
         ? prev.filter(s => s !== serviceLabel)
         : [...prev, serviceLabel]
