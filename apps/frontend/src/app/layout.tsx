@@ -1,3 +1,8 @@
+// Force dynamic rendering for all pages to prevent static export errors during Docker build
+export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
+export const revalidate = 0;
+
 import { ThemeProvider } from '@/components/home/theme-provider';
 import { siteMetadata } from '@/lib/site-metadata';
 import type { Metadata, Viewport } from 'next';
@@ -109,11 +114,11 @@ export default function RootLayout({
           type="font/woff2"
           crossOrigin="anonymous"
         />
-        
+
         {/* DNS prefetch for analytics (loaded later but resolve DNS early) */}
         <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
         <link rel="dns-prefetch" href="https://eu.i.posthog.com" />
-        
+
         {/* Container Load - Initialize dataLayer with page context BEFORE GTM loads */}
         <script
           dangerouslySetInnerHTML={{
@@ -161,7 +166,7 @@ export default function RootLayout({
             `,
           }}
         />
-        
+
         {/* Static SEO meta tags - rendered in initial HTML */}
         <title>Kortix: Your Autonomous AI Worker</title>
         <meta name="description" content="Built for complex tasks, designed for everything. The ultimate AI assistant that handles it all—from simple requests to mega-complex projects." />
@@ -178,7 +183,7 @@ export default function RootLayout({
         <meta name="twitter:image" content="https://kortix.com/banner.png" />
         <meta name="twitter:site" content="@kortix" />
         <link rel="canonical" href="https://kortix.com" />
-        
+
         {/* iOS Smart App Banner - shows native install banner in Safari */}
         {!featureFlags.disableMobileAdvertising ? (
           <meta name="apple-itunes-app" content="app-id=6754448524, app-argument=kortix://" />
@@ -248,13 +253,13 @@ export default function RootLayout({
           <AuthProvider>
             <I18nProvider>
               <PresenceProvider>
-              <ReactQueryProvider>
-                {children}
-                <Toaster />
-                <Suspense fallback={null}>
-                  <PlanSelectionModal />
-                </Suspense>
-              </ReactQueryProvider>
+                <ReactQueryProvider>
+                  {children}
+                  <Toaster />
+                  <Suspense fallback={null}>
+                    <PlanSelectionModal />
+                  </Suspense>
+                </ReactQueryProvider>
               </PresenceProvider>
             </I18nProvider>
           </AuthProvider>
@@ -263,9 +268,9 @@ export default function RootLayout({
             <Analytics />
           </Suspense>
           {process.env.NEXT_PUBLIC_GTM_ID && (
-          <Suspense fallback={null}>
+            <Suspense fallback={null}>
               <GoogleTagManager gtmId={process.env.NEXT_PUBLIC_GTM_ID} />
-          </Suspense>
+            </Suspense>
           )}
           <Suspense fallback={null}>
             <SpeedInsights />
