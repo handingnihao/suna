@@ -1,0 +1,200 @@
+name: Build LazyCat LPK Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag for the LPK package'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tag: ${{ steps.meta.outputs.backend_tag }}
+      frontend_tag: ${{ steps.meta.outputs.frontend_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tags
+        id: meta
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "backend_tag=ghcr.io/${{ github.repository }}/suna-backend:lazycat-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "frontend_tag=ghcr.io/${{ github.repository }}/suna-frontend:lazycat-${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.backend_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/frontend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.frontend_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            PNPM_LOCKFILE_MODE=--no-frozen-lockfile
+
+  generate-lpk:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install docker2lzc
+        run: npm install -g docker2lzc
+
+      - name: Generate manifest.yml
+        run: |
+          cat > manifest.yml << 'EOF'
+          name: "Kortix AI Agent"
+          package: "cloud.lazycat.app.kortix"
+          description: "完整的 AI Agent 开发平台 - 创建自主工作的 AI 代理，支持浏览器自动化、文件管理、网络智能、系统操作。内置 Kortix Super Worker 通用 AI 助手。"
+          version: "${{ github.event.inputs.version }}"
+          author: "Kortix AI"
+          homepage: "https://github.com/kortix-ai/suna"
+
+          locales:
+            zh:
+              name: "Kortix AI Agent"
+              description: "完整的 AI Agent 开发平台 - 创建自主工作的 AI 代理，支持浏览器自动化、文件管理、网络智能、系统操作。"
+            en:
+              name: "Kortix AI Agent"
+              description: "Complete AI agent platform for creating autonomous AI workers with browser automation, file management, and API integrations."
+
+          application:
+            subdomain: "kortix"
+            multi_instance: false
+            background_task: false
+            routes:
+              - /=http://frontend:3000/
+              - /api=http://backend:8000/
+              - /v1=http://backend:8000/v1
+            public_path:
+              - /
+            health_check:
+              test_url: /
+              timeout: 60s
+              interval: 30s
+
+          unsupported_platforms:
+            - ios
+            - android
+
+          services:
+            redis:
+              image: redis:7-alpine
+              binds:
+                - /lzcapp/var/redis:/data
+              command: "redis-server --save 60 1 --loglevel warning"
+              healthcheck:
+                test: ["CMD", "redis-cli", "ping"]
+                interval: 10s
+                timeout: 5s
+                retries: 3
+                start_period: 10s
+
+            backend:
+              image: ${{ needs.build-images.outputs.backend_tag }}
+              user: root
+              environment:
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
+                - REDIS_PASSWORD=
+                - REDIS_SSL=False
+                - BASE_URL=https://${LAZYCAT_APP_DOMAIN}
+              depends_on:
+                - redis
+              binds:
+                - /lzcapp/var/backend/.env:/app/.env
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 60s
+
+            frontend:
+              image: ${{ needs.build-images.outputs.frontend_tag }}
+              environment:
+                - NEXT_PUBLIC_BACKEND_URL=http://backend:8000/v1
+                - NEXT_PUBLIC_URL=https://${LAZYCAT_APP_DOMAIN}
+                - NEXT_PUBLIC_ENV_MODE=LOCAL
+              depends_on:
+                - backend
+              healthcheck:
+                test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 60s
+          EOF
+
+      - name: Prepare icon
+        run: cp apps/frontend/public/favicon.png icon.png
+
+      - name: Create LPK package
+        run: |
+          zip -r kortix-${{ github.event.inputs.version }}.lpk manifest.yml icon.png
+
+      - name: Upload LPK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kortix-lpk-${{ github.event.inputs.version }}
+          path: kortix-${{ github.event.inputs.version }}.lpk
+          retention-days: 30
+
+      - name: Print next steps
+        run: |
+          echo "============================================"
+          echo "LPK Package built successfully!"
+          echo "============================================"
+          echo ""
+          echo "Next steps for LazyCat deployment:"
+          echo ""
+          echo "1. Download the LPK artifact from this workflow run"
+          echo ""
+          echo "2. Copy images to LazyCat registry:"
+          echo "   lzc-cli appstore copy-image redis:7-alpine"
+          echo "   lzc-cli appstore copy-image ${{ needs.build-images.outputs.backend_tag }}"
+          echo "   lzc-cli appstore copy-image ${{ needs.build-images.outputs.frontend_tag }}"
+          echo ""
+          echo "3. Update manifest.yml with the new registry URLs"
+          echo ""
+          echo "4. Install the LPK:"
+          echo "   lzc-cli app install kortix-${{ github.event.inputs.version }}.lpk"
+          echo ""
+          echo "5. Configure Supabase and LLM API keys in /lzcapp/var/backend/.env"
+          echo "============================================"

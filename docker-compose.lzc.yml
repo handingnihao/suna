@@ -1,0 +1,47 @@
+# ============================================================================
+# KORTIX SUNA - LAZYCAT MICROSERVICE DOCKER COMPOSE
+# ============================================================================
+# 专为懒猫微服平台优化的 Docker Compose 配置
+#
+# 使用方式：
+#   docker2lzc -c docker-compose.lzc.yml ...
+# ============================================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    image: ghcr.io/suna-ai/suna-backend:latest
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_SSL=False
+      - BASE_URL=https://${LAZYCAT_APP_DOMAIN}
+    volumes:
+      - backend_env:/app/.env:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ghcr.io/suna-ai/suna-frontend:latest
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://backend:8000/v1
+      - NEXT_PUBLIC_URL=https://${LAZYCAT_APP_DOMAIN}
+      - NEXT_PUBLIC_ENV_MODE=LOCAL
+    depends_on:
+      - backend
+
+volumes:
+  redis_data:
+  backend_env:
